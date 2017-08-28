@@ -36,7 +36,6 @@ public:
 
 	T& iesimo(int i) const {
 		Nodo *n = _head.load();
-		int j;
 		for (int j = 0; j < i; j++)
 			n = n->_next;
 		return n->_val;
