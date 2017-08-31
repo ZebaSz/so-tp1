@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
 #include "ListaAtomica.hpp"
 
 typedef unsigned int uint;
@@ -49,7 +50,7 @@ private:
 
     std::mutex mod_counter_lock;
 
-    std::mutex notify_lock;
+    std::condition_variable mod_counter_condition;
 };
 
 #endif //SO_TP1_CONCURRENTHASHMAP_H

@@ -1,6 +1,7 @@
 #include <mutex>
 #include <fstream>
 #include <thread>
+#include <condition_variable>
 #include "ConcurrentHashMap.hpp"
 
 
@@ -18,16 +19,13 @@ ConcurrentHashMap::~ConcurrentHashMap() {
 
 void ConcurrentHashMap::addAndInc(std::string key) {
     // check for other ops running
-    mod_counter_lock.lock();
-    while(mod_counter < 0) {
-        // maximum is running, wait until they're finished
-        mod_counter_lock.unlock();
-        notify_lock.lock();
-        mod_counter_lock.lock();
+    {
+        std::unique_lock<std::mutex> unique_lock(mod_counter_lock);
+        // if maximum is running, wait until they're finished
+        mod_counter_condition.wait(unique_lock, [&]{return mod_counter >= 0;});
+        // register this instance
+        ++mod_counter;
     }
-    // register this instance
-    ++mod_counter;
-    mod_counter_lock.unlock();
     // lock the list for that hash
     int h = hash(key);
     add_locks[h].lock();
@@ -49,7 +47,7 @@ void ConcurrentHashMap::addAndInc(std::string key) {
     --mod_counter;
     if(mod_counter == 0) {
         // no more concurrent adding, maximum can run now
-        notify_lock.unlock();
+        mod_counter_condition.notify_all();
     }
     mod_counter_lock.unlock();
 }
@@ -85,21 +83,17 @@ void maximum_internal(ConcurrentHashMap& map,
 
 entrada ConcurrentHashMap::maximum(uint nt) {
     // check for other ops running
-    mod_counter_lock.lock();
-    while(mod_counter > 0) {
-        // addAndInc is running, wait until they're finished
-        mod_counter_lock.unlock();
-        notify_lock.lock();
-        mod_counter_lock.lock();
+    {
+        std::unique_lock<std::mutex> unique_lock(mod_counter_lock);
+        // if addAndInc is running, wait until they're finished
+        mod_counter_condition.wait(unique_lock, [&]{return mod_counter <= 0;});
+        // register this instance
+        ++mod_counter;
     }
-    // register this instance
-    --mod_counter;
-    mod_counter_lock.unlock();
 
     // set up threads
     Lista<entrada&> resultados;
     std::atomic<uint> next(0);
-
     // start threads
     std::vector< std::thread > ts;
     for (uint i = 0; i < nt; ++i) {
@@ -125,7 +119,7 @@ entrada ConcurrentHashMap::maximum(uint nt) {
     ++mod_counter;
     if(mod_counter == 0) {
         // no more concurrent maximums, addAndInc can run now
-        notify_lock.unlock();
+        mod_counter_condition.notify_all();
     }
     mod_counter_lock.unlock();
     return max.Siguiente();
