@@ -28,7 +28,8 @@ public:
 
 	void push_front(const T& val) {
         Nodo* nuevo = new Nodo(val);
-        nuevo->_next = _head.exchange(nuevo);
+		nuevo->_next = _head.load();
+		while(!std::atomic_compare_exchange_weak(&_head, &nuevo->_next, nuevo));
 	}
 
 	T& front() const {
