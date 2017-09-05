@@ -38,9 +38,9 @@ public:
 
     ConcurrentHashMap& operator=(ConcurrentHashMap&& other);
 
-private:
-
     ConcurrentHashMap(ConcurrentHashMap&& other);
+
+private:
 
     unsigned char hash(const std::string& key);
 
