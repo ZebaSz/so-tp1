@@ -185,25 +185,52 @@ ConcurrentHashMap ConcurrentHashMap::count_words(unsigned int n, std::list<std::
     return map;
 }
 
+void count_words_single(ConcurrentHashMap& unifiedMap,
+                        const std::vector<std::string>& archs,
+                        std::atomic_uint& next) {
+    uint cur;
+    while((cur = next++) < archs.size()) {
+        std::string arch = archs[cur];
+        ConcurrentHashMap map = ConcurrentHashMap::count_words(arch);
+
+        for (int i = 0; i < 26; ++i) {
+            for (auto lista = map.tabla[i]->CrearIt(); lista.HaySiguiente(); lista.Avanzar()) {
+                for (uint j = 0; j < lista.Siguiente().second; ++j) {
+                    unifiedMap.addAndInc(lista.Siguiente().first);
+                }
+            }
+        }
+    }
+}
+
+// ugly not-so-concurrent version
 entrada ConcurrentHashMap::maximum(unsigned int p_archivos,
                                    unsigned int p_maximos,
                                    std::list<std::string> archs) {
-    // FIXME: this is the same as ConcurrentHashMap::count_words,
-    // but it was forbidden to use said function
-    ConcurrentHashMap map;
+    ConcurrentHashMap unifiedMap;
+    Lista<ConcurrentHashMap> maps;
     std::vector<std::string> files(archs.begin(), archs.end());
     std::atomic_uint next(0);
     // start exactly n threads
     std::list< std::thread > ts;
     for (uint i = 0; i < p_archivos; ++i) {
-        ts.push_back(std::thread(add_words_multiple, std::ref(map), std::ref(files), std::ref(next)));
+        ts.push_back(std::thread(count_words_single, std::ref(unifiedMap),
+                                 std::cref(files), std::ref(next)));
     }
     // sync with all threads
     for (auto it = ts.begin(); it != ts.end(); ++it) {
         it->join();
     }
-    return map.maximum(p_maximos);
+    return unifiedMap.maximum(p_maximos);
 }
+
+// pretty concurrent version
+/*
+entrada ConcurrentHashMap::maximum(unsigned int p_archivos,
+                                   unsigned int p_maximos,
+                                   std::list<std::string> archs) {
+    return ConcurrentHashMap::count_words(p_archivos, archs).maximum(p_maximos);
+}*/
 
 unsigned char ConcurrentHashMap::hash(const std::string &key) {
     return (unsigned char)key[0] - 'a';
