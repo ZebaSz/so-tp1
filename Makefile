@@ -59,7 +59,7 @@ test-time: $(OBJ) test-time.cpp
 
 test-time-run: test-time
 	rm -f time-data.csv
-	echo "tarch,tmax,ej,ns" > time-data.csv
+	echo "tarch,tmax,count_words concurrente,Tiempo en nanosegundos" > time-data.csv
 	for i in 0 1 2 3 4; do sed -n "$$((i * 500 + 1)),$$(((i + 1) * 500))p" corpus >corpus-"$$i"; done
 	for i in 0 1 2 3 4; do for j in 0 1 2 3 4; do \
 		./test-time $$((i + 1)) $$((j + 1)); \

@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
         ConcurrentHashMap::maximum(tarch, tmax, l);
         clock_gettime(CLOCK_REALTIME, &end);
         ulong diff = TO_NS(end) - TO_NS(start) ;
-        fprintf(f,"%u,%u,5,%lu\n", tarch, tmax, diff);
+        fprintf(f,"%u,%u,No,%lu\n", tarch, tmax, diff);
         if(best > diff) {
             best = diff;
         }
@@ -43,7 +43,7 @@ int main(int argc, char **argv) {
         ConcurrentHashMap::maximum_6(tarch, tmax, l);
         clock_gettime(CLOCK_REALTIME, &end);
         ulong diff = TO_NS(end) - TO_NS(start) ;
-        fprintf(f,"%u,%u,6,%lu\n", tarch, tmax, diff);
+        fprintf(f,"%u,%u,Sí,%lu\n", tarch, tmax, diff);
         if(best > diff) {
             best = diff;
         }
