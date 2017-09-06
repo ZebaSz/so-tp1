@@ -1,5 +1,6 @@
 #include <time.h>
 #include <iostream>
+#include <climits>
 #include "ConcurrentHashMap.hpp"
 
 #define REPETITIONS 50
@@ -13,7 +14,7 @@ int main(int argc, char **argv) {
     }
     uint tarch = (uint)atoi(argv[1]);
     uint tmax = (uint)atoi(argv[2]);
-    ulong best;
+    ulong best = ULONG_MAX;
     std::list<std::string> l = { "corpus-0", "corpus-1", "corpus-2", "corpus-3", "corpus-4" };
 
     std::cout << "tarch = " << tarch << ", tmax = "  << tmax << std::endl;
@@ -32,6 +33,8 @@ int main(int argc, char **argv) {
             best = diff;
         }
     }
+
+    best = ULONG_MAX;
 
     for (int i = 0; i < REPETITIONS; ++i) {
         timespec start;
