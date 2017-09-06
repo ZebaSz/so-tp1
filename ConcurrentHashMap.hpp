@@ -34,23 +34,19 @@ public:
 
     entrada maximum(uint nt);
 
-    Lista< entrada >* tabla[26];
-
-    ConcurrentHashMap& operator=(ConcurrentHashMap&& other);
-
-    ConcurrentHashMap(ConcurrentHashMap&& other);
+    std::shared_ptr<Lista< entrada >> tabla[26];
 
 private:
 
     unsigned char hash(const std::string& key);
 
-    std::mutex add_locks[26];
+    pthread_mutex_t add_locks[26];
 
     int mod_counter;
 
-    std::mutex mod_counter_lock;
+    pthread_mutex_t mod_counter_lock;
 
-    std::condition_variable mod_counter_condition;
+    pthread_cond_t mod_counter_condition;
 };
 
 #endif //SO_TP1_CONCURRENTHASHMAP_H

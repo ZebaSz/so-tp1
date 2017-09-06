@@ -6,56 +6,61 @@
 
 
 ConcurrentHashMap::ConcurrentHashMap() : mod_counter(0) {
+    pthread_mutex_init(&mod_counter_lock, NULL);
+    pthread_cond_init(&mod_counter_condition, NULL);
     for (int i = 0; i < 26; ++i) {
-        tabla[i] = new Lista<entrada>();
+        tabla[i] = std::make_shared<Lista<entrada>>();
+        pthread_mutex_init(&add_locks[i], NULL);
     }
 }
 
 ConcurrentHashMap::~ConcurrentHashMap() {
+    pthread_mutex_destroy(&mod_counter_lock);
+    pthread_cond_destroy(&mod_counter_condition);
     for (int i = 0; i < 26; ++i) {
-        delete tabla[i];
+        pthread_mutex_destroy(&add_locks[i]);
     }
 }
 
 void ConcurrentHashMap::addAndInc(std::string key) {
     // check for other ops running
-    {
-        std::unique_lock<std::mutex> unique_lock(mod_counter_lock);
-        // if maximum is running, wait until they're finished
-        mod_counter_condition.wait(unique_lock, [&] { return mod_counter >= 0; });
-        // register this instance
-        ++mod_counter;
+    pthread_mutex_lock(&mod_counter_lock);
+    // if maximum is running, wait until they're finished
+    while(mod_counter < 0) {
+        pthread_cond_wait(&mod_counter_condition, &mod_counter_lock);
     }
-    {
-        // lock the list for that hash
-        int h = hash(key);
-        std::lock_guard<std::mutex> lock_guard(add_locks[h]);
-        // do the actual adding
-        auto it = tabla[h]->CrearIt();
-        for (; it.HaySiguiente(); it.Avanzar()) {
-            if (it.Siguiente().first == key) {
-                ++it.Siguiente().second;
-                break;
-            }
-        }
-        if (!it.HaySiguiente()) {
-            tabla[h]->push_front(entrada(key, 1));
+    // register this instance
+    ++mod_counter;
+    pthread_mutex_unlock(&mod_counter_lock);
+
+    // lock the list for that hash
+    int h = hash(key);
+    pthread_mutex_lock(&add_locks[h]);
+    // do the actual adding
+    auto it = tabla[h]->CrearIt();
+    for (; it.HaySiguiente(); it.Avanzar()) {
+        if (it.Siguiente().first == key) {
+            ++it.Siguiente().second;
+            break;
         }
     }
-    {
-        // deregister this instance
-        std::lock_guard<std::mutex> lock_guard(mod_counter_lock);
-        --mod_counter;
-        if (mod_counter == 0) {
-            // no more concurrent adding, maximum can run now
-            mod_counter_condition.notify_all();
-        }
+    if (!it.HaySiguiente()) {
+        tabla[h]->push_front(entrada(key, 1));
     }
+    pthread_mutex_unlock(&add_locks[h]);
+
+    // deregister this instance
+    pthread_mutex_lock(&mod_counter_lock);
+    --mod_counter;
+    if (mod_counter == 0) {
+        // no more concurrent adding, maximum can run now
+        pthread_cond_broadcast(&mod_counter_condition);
+    }
+    pthread_mutex_unlock(&mod_counter_lock);
 }
 
 bool ConcurrentHashMap::member(std::string key) {
-    // FIXME: this needs to be wait-free, can we do this with mutexes?
-    Lista<entrada>* l = tabla[hash(key)];
+    std::shared_ptr<Lista<entrada>> l = tabla[hash(key)];
     for (auto it = l->CrearIt(); it.HaySiguiente(); it.Avanzar()) {
         if(it.Siguiente().first == key) {
             return true;
@@ -65,12 +70,12 @@ bool ConcurrentHashMap::member(std::string key) {
 }
 
 void maximum_internal(ConcurrentHashMap& map,
-                      std::mutex& compare_lock,
+                      pthread_mutex_t* compare_lock,
                       entrada** res,
                       std::atomic_uint& next) {
     uint cur;
     while((cur = next++) < 26) {
-        Lista<entrada>* l = map.tabla[cur];
+        std::shared_ptr<Lista<entrada>> l = map.tabla[cur];
         auto max = l->CrearIt();
         if(max.HaySiguiente()) {
             for (auto it = max; it.HaySiguiente(); it.Avanzar()) {
@@ -78,36 +83,38 @@ void maximum_internal(ConcurrentHashMap& map,
                     max = it;
                 }
             }
-            {
-                std::lock_guard<std::mutex> lock_guard(compare_lock);
-                if(*res == nullptr || (*res)->second < max.Siguiente().second) {
-                    *res = &max.Siguiente();
-                }
+
+            pthread_mutex_lock(compare_lock);
+            if(*res == NULL || (*res)->second < max.Siguiente().second) {
+                *res = &max.Siguiente();
             }
+            pthread_mutex_unlock(compare_lock);
         }
     }
 }
 
 entrada ConcurrentHashMap::maximum(uint nt) {
     // check for other ops running
-    {
-        std::unique_lock<std::mutex> unique_lock(mod_counter_lock);
-        // if addAndInc is running, wait until they're finished
-        mod_counter_condition.wait(unique_lock, [&]{return mod_counter <= 0;});
-        // register this instance
-        ++mod_counter;
+    pthread_mutex_lock(&mod_counter_lock);
+    // if addAndInc is running, wait until they're finished
+    while(mod_counter > 0) {
+        pthread_cond_wait(&mod_counter_condition, &mod_counter_lock);
     }
+    // register this instance
+    --mod_counter;
+    pthread_mutex_unlock(&mod_counter_lock);
 
     // set up threads
     entrada* e = nullptr;
-    std::mutex compare_lock;
+    pthread_mutex_t compare_lock;
+    pthread_mutex_init(&compare_lock, NULL);
     std::atomic_uint next(0);
     // start threads
     std::vector< std::thread > ts;
     for (uint i = 0; i < nt; ++i) {
         ts.push_back(std::thread(maximum_internal,
                                  std::ref(*this),
-                                 std::ref(compare_lock),
+                                 &compare_lock,
                                  &e,
                                  std::ref(next)));
     }
@@ -115,16 +122,18 @@ entrada ConcurrentHashMap::maximum(uint nt) {
     for (uint i = 0; i < nt; ++i) {
         ts[i].join();
     }
-    {
-        // deregister this instance
-        std::lock_guard<std::mutex> lock_guard(mod_counter_lock);
-        ++mod_counter;
-        if (mod_counter == 0) {
-            // no more concurrent maximums, addAndInc can run now
-            mod_counter_condition.notify_all();
-        }
-        return *e;
+    pthread_mutex_destroy(&compare_lock);
+
+    // deregister this instance
+    pthread_mutex_lock(&mod_counter_lock);
+    ++mod_counter;
+    if (mod_counter == 0) {
+        // no more concurrent adding, maximum can run now
+        pthread_cond_broadcast(&mod_counter_condition);
     }
+    entrada res(*e);
+    pthread_mutex_unlock(&mod_counter_lock);
+    return res;
 }
 
 ConcurrentHashMap ConcurrentHashMap::count_words(std::string arch) {
@@ -234,41 +243,4 @@ entrada ConcurrentHashMap::maximum(unsigned int p_archivos,
 
 unsigned char ConcurrentHashMap::hash(const std::string &key) {
     return (unsigned char)key[0] - 'a';
-}
-
-// TODO: these are required due to mutex deleted constructors/assignments
-// see if there is a better way of doing this
-
-// Move constructor
-ConcurrentHashMap::ConcurrentHashMap(ConcurrentHashMap&& other) : ConcurrentHashMap() {
-    /* TODO: see if we should lock on move
-    {
-        std::unique_lock<std::mutex> this_lock(mod_counter_lock);
-        std::unique_lock<std::mutex> other_lock(other.mod_counter_lock);
-        mod_counter_condition.wait(this_lock, [&] { return mod_counter == 0; });
-        other.mod_counter_condition.wait(other_lock, [&other] { return other.mod_counter == 0; });
-    */
-    for (int i = 0; i < 26; ++i) {
-        tabla[i] = other.tabla[i];
-        other.tabla[i] = nullptr;
-    }
-    //}
-}
-
-// Move assignment
-ConcurrentHashMap& ConcurrentHashMap::operator=(ConcurrentHashMap&& other) {
-    /* TODO: see if we should lock on move
-    {
-        std::unique_lock<std::mutex> this_lock(mod_counter_lock);
-        std::unique_lock<std::mutex> other_lock(other.mod_counter_lock);
-        mod_counter_condition.wait(this_lock, [&] { return mod_counter == 0; });
-        other.mod_counter_condition.wait(other_lock, [&other] { return other.mod_counter == 0; });
-    */
-    for (int i = 0; i < 26; ++i) {
-        delete tabla[i];
-        tabla[i] = other.tabla[i];
-        other.tabla[i] = nullptr;
-    }
-    //}
-    return *this;
 }
