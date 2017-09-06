@@ -1,5 +1,54 @@
 \section{Intro}
-Además de la tabla de listas para cada entrada del mapa, decidimos agregar un contador de modificaciones, el cual tendrá dos utilidades en la clase, una es evitar que se ejecute addAndInc cuando se está ejecutando maximum y viceversa, y la otra es saber cuántas de estas se están ejecutando. Si el valor de este contador es positivo quiere decir que se están ejecutando ese número de addAndInc, y si es negativo se está ejecutando maximum. Para sincronizar correctamente los varios hilos de ejecución, utilizamos 2 mecanismos: por un lado, el contador está protegido por un mutex, para evitar que sea editado por 2 operaciones a la vez; y una variable de condición, que pone al thread en espera mientras la operación que desea realizar esté prohibida (por ejemplo, calcular maximum mientras se está agregando un elemento). También contamos con un arreglo de mutexes para bloquear cada lista individualmente mientras agregamos elementos.
+
+El propósito de este trabajo práctico es experimentar con \texttt{pthreads}, tanto por los beneficios que trae (en particular en terminos en de performance) y los desafíos que presenta (al sincronizar los varios hilos de ejecución y mantener consistencia). En este TP se implementa un ConcurrentHashMap simplificado que alberga strings y contadores de las mismas.
 
 \section{Ejercicio 1}
-En el primer ejercicio se pide implementar el método push\_front de la lista atómica. Aquí tenemos crear un nuevo nodo y que este sea la nueva cabeza de la lista y que apunte a la vieja cabeza. El primer problema que nos cruzamos fue que primero realizabamos un exchange atómico de la cabeza antigua con el nuevo nodo y luego se lo apuntaba la la nueva cabeza. Este conjunto de operaciones no era atómico por lo que en ciertas situaciones si justo se intentaba de iterar la lista en el medio de estas dos operaciones habría una condición de carrera en la que la lista podría contener un solo elemento. Esto se solucionó aplicando la función atómica compare\_exchange\_weak a la vieja cabeza de la lista, asegurando que el nuevo nodo siempre apunte al último nodo agregado exitosamente.
+
+Este ejercicio consistía en la implementación de las estructuras de datos del trabajo práctico. Por un lado, había que completar la Lista Atómica provista por la cátedra, y por el otro había que implementar desde cero un ConcurrentHashMap, utilizando la Lista previamente mencionada.
+
+\subsection{Lista Atómica}
+
+La lista se encontraba mayormente implementada, salvo por una operación: \texttt{push\_front}. Esta operación es la única que modifica la lista en sí (si ignoramos la modificación de sus elementos), por lo que esta operación es la que hace a la lista ''atómica``.
+
+Nos dimos cuenta que, como modificar un puntero no es una operación atómica, no bastaría con cargar el nuevo valor para la cabeza de la lista, o podríamos perder elementos. Nuestro primer enfoque hacía un exchange atómico con la nueva cabeza, y luego cargaba la cabeza anterior como siguiente elemento. Esta operación no era puramente atómica, y pudimos hayar casos donde se daba una \textit{race condition} y, si bien los elementos eran perdidos permanentemente, si desaparecían durante un corto lapso, durante el cual la cabeza no conocía a los elementos que estaban anteriormente.
+
+La operación que utilizamos en la versión final es un \texttt{atomic\_compare\_exchange\_weak}, un compare-and-swap que garantiza que, al insertar el nuevo elemento, el mismo apunta al último nodo agregado exitosamente. Como el compare-and-swap no necesariamente es exitoso al principio (alguien puede haber cargado un nuevo valor desde la última vez que fue leído), este compare-and-swap está en un loop hasta que el elemento puede ser insertado sin interrupción.
+
+Esto significa que la inserción no necesariamente coincide con el orden en que fueron llamadas, sino que depende de los cambios de contexto/thread.
+
+\subsection{ConcurrentHashMap}
+
+El ConcurrentHashMap implementado toma ciertas medidas para permitir que ciertas operaciones (pero no todas) puedan ser ejecutadas en paralelo:
+
+\begin{itemize}
+
+	\item Un contador de operaciones, el cual tendrá dos utilidades en la clase: vitar que se ejecute \texttt{addAndInc} cuando se está ejecutando \texttt{maximum} y vice-versa; y saber cuántas de estas operaciones se están ejecutando. Si el valor de este contador es positivo quiere decir que se están ejecutando ese número de \texttt{addAndInc}, y si es negativo se está ejecutando \texttt{maximum}.
+
+	\item Un mutex que proteje dicho contador y evita que dos operaciones conflictivas se inicien accidentalmente al mismo tiempo.
+
+	\item Una variable de condición que genera un broadcast cuando el contador llega a 0, permitiendo que las tareas que no podían ejecutarse lo hagan ahora y evitando el busy waiting.
+
+	\item Una lista de mutexes, uno por cada fila de la tabla del hashmap, para proteger dichas filas y evitar el agregado de elementos duplicados (ya que \texttt{addAndInc} puede ser concurrente con si mismo).
+
+\end{itemize}
+
+Entre otras cosas, también consideramos al implementar el HashMap:
+
+\begin{itemize}
+
+	\item Utilizar un mutex en lugar de una variable de condición, pero lo consideramos ineficiente y propenso a condiciones de carrera (mientras que este es el caso de uso exacto de una variable de condición).
+
+	\item Utilizar \texttt{std::atomic\_uint} en lugar de \texttt{unsigned int} para las entradas del HashMap, pero resulto más sencillo usar el tipo primitivo dada la firma del método a cumplir y que un mutex por fila seguría siendo necesario en ciertos contextos.
+
+\end{itemize}
+
+Como nota al margen, nos encontramos con una dificultades relacionadas con como C y C++ manejan la memoria y los constructores por copia/operadores de asignación:
+
+
+\begin{itemize}
+
+	\item las clases \texttt{std::mutex}, \texttt{std::atomic} y otras primitivas de sincronización de la biblioteca STD de C++ eliminan explicitamente sus constructores y operadores de asignación por copia, eliminando a su vez los del ConcurrentHashMap y la Lista Atómica. Si bien estas clases contienen utilidades para evitar errores (como lock guards), optamos por utilizar los structs provistos en \texttt{pthread.h} (como \texttt{pthread\_mutex\_t}) para simplificar nuestra implementación.
+
+	\item Al asignar un ConcurrentHashMap, C debe copiarlo a su destino. Sin embargo, como nuestra tabla es una lista de punteros a Listas Atómicas, y las mismas no cuentan con constructor por copia, utilizamos \texttt{std::shared\_ptr} en lugar de punteros puros. De esta forma, cuando el HashMap es copiado y luego destruído, la tabla no es destruída, y las listas que fueron reemplazadas sí. Esto viene con la desventaja que la "copia" no es enteramente tal, y si se realiza una copia y se modifica, la tabla original también es modificada. Sin embargo, esto no debería afectar el caso de uso de este TP.
+
+\end{itemize}

@@ -19,7 +19,7 @@ void test_always_member(ConcurrentHashMap& map, const std::string& key, std::ato
 
 int main(void) {
     pair<string, unsigned int> p;
-    ConcurrentHashMap map;
+    ConcurrentHashMap map = ConcurrentHashMap::count_words("corpus");
     std::atomic_bool ok(true);
 
     std::ifstream file("corpus");

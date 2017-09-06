@@ -3,6 +3,8 @@
 #include "ConcurrentHashMap.hpp"
 
 #define REPETITIONS 50
+#define NS_IN_SEC 1000000000
+#define TO_NS(t) (unsigned long)(t.tv_nsec + t.tv_sec * NS_IN_SEC)
 
 int main(int argc, char **argv) {
     if (argc != 3) {
@@ -11,9 +13,7 @@ int main(int argc, char **argv) {
     }
     uint tarch = (uint)atoi(argv[1]);
     uint tmax = (uint)atoi(argv[2]);
-    timespec start;
-    timespec end;
-    unsigned long best;
+    ulong best;
     std::list<std::string> l = { "corpus-0", "corpus-1", "corpus-2", "corpus-3", "corpus-4" };
 
     std::cout << "tarch = " << tarch << ", tmax = "  << tmax << std::endl;
@@ -21,10 +21,12 @@ int main(int argc, char **argv) {
     FILE* f = fopen("time-data.csv" ,"a");
 
     for (int i = 0; i < REPETITIONS; ++i) {
+        timespec start;
+        timespec end;
         clock_gettime(CLOCK_REALTIME, &start);
         ConcurrentHashMap::maximum(tarch, tmax, l);
         clock_gettime(CLOCK_REALTIME, &end);
-        unsigned long diff =(unsigned long)(end.tv_nsec - start.tv_nsec) ;
+        ulong diff = TO_NS(end) - TO_NS(start) ;
         fprintf(f,"%u,%u,5,%lu\n", tarch, tmax, diff);
         if(best > diff) {
             best = diff;
@@ -32,10 +34,12 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 0; i < REPETITIONS; ++i) {
+        timespec start;
+        timespec end;
         clock_gettime(CLOCK_REALTIME, &start);
         ConcurrentHashMap::maximum_6(tarch, tmax, l);
         clock_gettime(CLOCK_REALTIME, &end);
-        unsigned long diff =(unsigned long)(end.tv_nsec - start.tv_nsec) ;
+        ulong diff = TO_NS(end) - TO_NS(start) ;
         fprintf(f,"%u,%u,6,%lu\n", tarch, tmax, diff);
         if(best > diff) {
             best = diff;
