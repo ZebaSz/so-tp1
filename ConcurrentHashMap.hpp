@@ -24,6 +24,10 @@ public:
                            uint p_maximos,
                            std::list<std::string> archs);
 
+    static entrada maximum_6(uint p_archivos,
+                           uint p_maximos,
+                           std::list<std::string> archs);
+
     ConcurrentHashMap();
 
     ~ConcurrentHashMap();
