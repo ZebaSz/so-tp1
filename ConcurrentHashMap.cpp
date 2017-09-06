@@ -70,8 +70,7 @@ bool ConcurrentHashMap::member(std::string key) {
 }
 
 void maximum_internal(ConcurrentHashMap& map,
-                      pthread_mutex_t* compare_lock,
-                      entrada** res,
+                      std::atomic<entrada*>* res,
                       std::atomic_uint& next) {
     uint cur;
     while((cur = next++) < 26) {
@@ -84,11 +83,9 @@ void maximum_internal(ConcurrentHashMap& map,
                 }
             }
 
-            pthread_mutex_lock(compare_lock);
-            if(*res == NULL || (*res)->second < max.Siguiente().second) {
-                *res = &max.Siguiente();
-            }
-            pthread_mutex_unlock(compare_lock);
+            entrada* old = res->load();
+            while((old == NULL || old->second < max.Siguiente().second)
+                  && !std::atomic_compare_exchange_weak(res, &old, &max.Siguiente()));
         }
     }
 }
@@ -105,16 +102,13 @@ entrada ConcurrentHashMap::maximum(uint nt) {
     pthread_mutex_unlock(&mod_counter_lock);
 
     // set up threads
-    entrada* e = nullptr;
-    pthread_mutex_t compare_lock;
-    pthread_mutex_init(&compare_lock, NULL);
+    std::atomic<entrada*> e(NULL);
     std::atomic_uint next(0);
     // start threads
     std::vector< std::thread > ts;
     for (uint i = 0; i < nt; ++i) {
         ts.push_back(std::thread(maximum_internal,
                                  std::ref(*this),
-                                 &compare_lock,
                                  &e,
                                  std::ref(next)));
     }
@@ -122,7 +116,6 @@ entrada ConcurrentHashMap::maximum(uint nt) {
     for (uint i = 0; i < nt; ++i) {
         ts[i].join();
     }
-    pthread_mutex_destroy(&compare_lock);
 
     // deregister this instance
     pthread_mutex_lock(&mod_counter_lock);
