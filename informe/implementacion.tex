@@ -30,6 +30,8 @@ El ConcurrentHashMap implementado toma ciertas medidas para permitir que ciertas
 
 \end{itemize}
 
+Por otro lado, la operación \texttt{member} es \textit{wait-free}, e ignora todos los locks. Como usamos la Lista Atómica, estamos seguros que la ejecución coincide a alguna ejecución secuencial: esto quiere decir, si bien es posible que el método devuelva \texttt{false} luego de que algo fue agregado, no es posible, luego de un resultado \texttt{true}, obtener un resultado \texttt{false} (que podría haber sucedido si la lista no estuviese implementada atómicamente, como en el ejemplo descrito anteriormente).
+
 Entre otras cosas, también consideramos al implementar el HashMap:
 
 \begin{itemize}
@@ -42,11 +44,26 @@ Entre otras cosas, también consideramos al implementar el HashMap:
 
 Como nota al margen, nos encontramos con una dificultades relacionadas con como C y C++ manejan la memoria y los constructores por copia/operadores de asignación:
 
-
 \begin{itemize}
 
 	\item las clases \texttt{std::mutex}, \texttt{std::atomic} y otras primitivas de sincronización de la biblioteca STD de C++ eliminan explicitamente sus constructores y operadores de asignación por copia, eliminando a su vez los del ConcurrentHashMap y la Lista Atómica. Si bien estas clases contienen utilidades para evitar errores (como lock guards), optamos por utilizar los structs provistos en \texttt{pthread.h} (como \texttt{pthread\_mutex\_t}) para simplificar nuestra implementación.
 
 	\item Al asignar un ConcurrentHashMap, C debe copiarlo a su destino. Sin embargo, como nuestra tabla es una lista de punteros a Listas Atómicas, y las mismas no cuentan con constructor por copia, utilizamos \texttt{std::shared\_ptr} en lugar de punteros puros. De esta forma, cuando el HashMap es copiado y luego destruído, la tabla no es destruída, y las listas que fueron reemplazadas sí. Esto viene con la desventaja que la "copia" no es enteramente tal, y si se realiza una copia y se modifica, la tabla original también es modificada. Sin embargo, esto no debería afectar el caso de uso de este TP.
+
+\end{itemize}
+
+\section{Uso de threads}
+
+Para la implementación de las funciones concurrentes tuvimos que tener en cuenta los siguientes detalles:
+
+\begin{itemize}
+
+	\item Para usar \texttt{pthreads}, consideramos conveniente definir structs relacionados a cada función a ser llamada desde los threads auxiliares. Estos structs contienen casi exclusivamente punteros/referencias.
+
+	\item Para la mayoría de los casos, para evitar el cálculo duplicado de resultados utilizamos contadores atómicos. De esta forma, cada thread estaba informado de si había más trabajo para hacer, o si estaba finalizado.
+
+	\item En el caso de \texttt{maximum}, como el mismo utiliza concurrencia interna y debe publicar un único resultado, también utilizamos una variable atómica para el máximo encontrado, con publicación de resultado via compare-and-swap (al igual que la Lista Atómica). Originalmente utilizamos un mutex para este mismo propósito, pero consideramos que un CAS era probablemente más eficiente que un lock.
+
+	\item Originalmente habíamos implementado esto con \texttt{std::thread}, que tiene una implementación más sencilla (se pueden pasar parámetros arbitrarios en lugar de crear un struct). Sin embargo, entendemos que está fuera del scope de este TP, por lo que reimplementamos todo con \texttt{pthreads}.
 
 \end{itemize}
