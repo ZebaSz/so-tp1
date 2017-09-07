@@ -5,21 +5,30 @@
 
 using namespace std;
 
-void test_always_member(ConcurrentHashMap& map, const std::string& key, std::atomic_bool& ok) {
-    map.addAndInc(key);
+struct test_s {
+    test_s(ConcurrentHashMap &map, const string &key, atomic_bool &ok) : map(map), key(key), ok(ok) {}
+    ConcurrentHashMap& map;
+    const std::string& key;
+    std::atomic_bool& ok;
+};
+
+void* test_always_member(void* arg) {
+    test_s* params = (test_s*)arg;
+    params->map.addAndInc(params->key);
     for (int i = 0; i < 10; ++i) {
-        if (!map.member(key)) {
-            std::cerr << "Wait, where did it go? Key: " << key << std::endl;
-            ok.store(false);
+        if (!params->map.member(params->key)) {
+            std::cerr << "Wait, where did it go? Key: " << params->key << std::endl;
+            params->ok.store(false);
             break;
         }
     }
+    pthread_exit(NULL);
 }
 
 
 int main(void) {
     pair<string, unsigned int> p;
-    ConcurrentHashMap map = ConcurrentHashMap::count_words("corpus");
+    ConcurrentHashMap map;
     std::atomic_bool ok(true);
 
     std::ifstream file("corpus");
@@ -29,15 +38,24 @@ int main(void) {
         lines.push_back(line);
     }
 
-    std::list<std::thread> threads;
+    std::list<pthread_t> threads;
+
+    std::vector<test_s*> params;
 
     for (auto it = lines.begin(); it != lines.end(); ++it) {
-        threads.push_back(std::thread(test_always_member, std::ref(map),
-                                      std::cref(*it), std::ref(ok)));
+        test_s* param = new test_s(map, *it, ok);
+        params.push_back(param);
+        pthread_t t;
+        pthread_create(&t, NULL, test_always_member, param);
+        threads.push_back(t);
     }
     for (auto it = threads.begin(); it != threads.end(); ++it) {
-        it->join();
+        pthread_join(*it, NULL);
     }
+    for (auto it = params.begin(); it != params.end(); ++it) {
+        delete *it;
+    }
+    params.clear();
     if(ok.load()) {
         for (auto it = lines.begin(); it != lines.end(); ++it) {
             if (!map.member(*it)) {

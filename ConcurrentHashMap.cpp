@@ -69,12 +69,17 @@ bool ConcurrentHashMap::member(std::string key) {
     return false;
 }
 
-void maximum_internal(ConcurrentHashMap& map,
-                      std::atomic<entrada*>* res,
-                      std::atomic_uint& next) {
+struct maximum_s {
+    ConcurrentHashMap& map;
+    std::atomic<entrada*>* res;
+    std::atomic_uint& next;
+};
+
+void* maximum_internal(void* arg) {
+    maximum_s* params = (maximum_s*)arg;
     uint cur;
-    while((cur = next++) < 26) {
-        std::shared_ptr<Lista<entrada>> l = map.tabla[cur];
+    while((cur = params->next++) < 26) {
+        std::shared_ptr<Lista<entrada>> l = params->map.tabla[cur];
         auto max = l->CrearIt();
         if(max.HaySiguiente()) {
             for (auto it = max; it.HaySiguiente(); it.Avanzar()) {
@@ -83,11 +88,12 @@ void maximum_internal(ConcurrentHashMap& map,
                 }
             }
 
-            entrada* old = res->load();
+            entrada* old = params->res->load();
             while((old == NULL || old->second < max.Siguiente().second)
-                  && !std::atomic_compare_exchange_weak(res, &old, &max.Siguiente()));
+                  && !std::atomic_compare_exchange_weak(params->res, &old, &max.Siguiente()));
         }
     }
+    pthread_exit(NULL);
 }
 
 entrada ConcurrentHashMap::maximum(uint nt) {
@@ -105,16 +111,17 @@ entrada ConcurrentHashMap::maximum(uint nt) {
     std::atomic<entrada*> e(NULL);
     std::atomic_uint next(0);
     // start threads
-    std::vector< std::thread > ts;
+    std::vector< pthread_t > ts;
+    maximum_s params = {*this, &e, next};
+
     for (uint i = 0; i < nt; ++i) {
-        ts.push_back(std::thread(maximum_internal,
-                                 std::ref(*this),
-                                 &e,
-                                 std::ref(next)));
+        pthread_t t;
+        pthread_create(&t, NULL, maximum_internal, &params);
+        ts.push_back(t);
     }
     // sync with all threads
     for (uint i = 0; i < nt; ++i) {
-        ts[i].join();
+        pthread_join(ts[i], NULL);
     }
 
     // deregister this instance
@@ -124,7 +131,7 @@ entrada ConcurrentHashMap::maximum(uint nt) {
         // no more concurrent adding, maximum can run now
         pthread_cond_broadcast(&mod_counter_condition);
     }
-    entrada res(*e);
+    entrada res(*e.load());
     pthread_mutex_unlock(&mod_counter_lock);
     return res;
 }
@@ -139,78 +146,119 @@ ConcurrentHashMap ConcurrentHashMap::count_words(std::string arch) {
     return map;
 }
 
-void add_words(ConcurrentHashMap& map, std::string arch) {
-    std::ifstream file(arch);
+struct add_words_s {
+    add_words_s(ConcurrentHashMap &map, const std::string &arch) : map(map), arch(arch) {}
+    ConcurrentHashMap& map;
+    const std::string& arch;
+};
+
+void add_words(add_words_s* params) {
+    std::ifstream file(params->arch);
     std::string line;
     while (std::getline(file, line)) {
-        map.addAndInc(line);
+        params->map.addAndInc(line);
     }
+}
+
+void* add_words_single(void* arg) {
+    add_words_s* params = (add_words_s*)arg;
+    add_words(params);
+    pthread_exit(NULL);
 }
 
 ConcurrentHashMap ConcurrentHashMap::count_words(std::list<std::string> archs) {
     ConcurrentHashMap map;
     // start a thread per file
-    std::list< std::thread > ts;
+    std::list< pthread_t > ts;
+    std::list< add_words_s* > params;
     for (auto it = archs.begin(); it != archs.end(); ++it) {
-        ts.push_back(std::thread(add_words, std::ref(map), *it));
+        add_words_s* param = new add_words_s(map, *it);
+        params.push_back(param);
+        pthread_t t;
+        pthread_create(&t, NULL, add_words_single, param);
+        ts.push_back(t);
     }
     // sync with all threads
     for (auto it = ts.begin(); it != ts.end(); ++it) {
-        it->join();
+        pthread_join(*it, NULL);
+    }
+    for (auto it = params.begin(); it != params.end(); ++it) {
+        delete *it;
     }
     return map;
 }
 
-void add_words_multiple(ConcurrentHashMap& map,
-                        const std::vector<std::string> archs,
-                        std::atomic_uint& next) {
+struct add_words_multiple_s {
+    ConcurrentHashMap& map;
+    const std::vector<std::string> archs;
+    std::atomic_uint& next;
+};
+
+void* add_words_multiple(void* arg) {
+    add_words_multiple_s* params = (add_words_multiple_s*) arg;
     uint cur;
-    while((cur = next++) < archs.size()) {
-        std::string arch = archs[cur];
-        add_words(map, arch);
+    while((cur = params->next++) < params->archs.size()) {
+        add_words_s param = {params->map, params->archs[cur]};
+        add_words(&param);
     }
+    pthread_exit(NULL);
 }
 
 ConcurrentHashMap ConcurrentHashMap::count_words(unsigned int n, std::list<std::string> archs) {
     ConcurrentHashMap map;
     std::vector<std::string> files(archs.begin(), archs.end());
     std::atomic_uint next(0);
+    add_words_multiple_s params = {map, files, next};
     // start exactly n threads
-    std::list< std::thread > ts;
+    std::list< pthread_t > ts;
     for (uint i = 0; i < n; ++i) {
-        ts.push_back(std::thread(add_words_multiple, std::ref(map), std::ref(files), std::ref(next)));
+        pthread_t t;
+        pthread_create(&t, NULL, add_words_multiple, &params);
+        ts.push_back(t);
     }
     // sync with all threads
     for (auto it = ts.begin(); it != ts.end(); ++it) {
-        it->join();
+        pthread_join(*it, NULL);
     }
     return map;
 }
 
-void count_words_single(Lista<ConcurrentHashMap>& maps,
-                        const std::vector<std::string>& archs,
-                        std::atomic_uint& next) {
+struct count_words_s {
+    Lista<ConcurrentHashMap>& maps;
+    const std::vector<std::string>& archs;
+    std::atomic_uint& next;
+};
+
+void* count_words_single(void* arg) {
+    count_words_s* params = (count_words_s*)arg;
     uint cur;
-    while((cur = next++) < archs.size()) {
-        maps.push_front(ConcurrentHashMap::count_words(archs[cur]));
+    while((cur = params->next++) < params->archs.size()) {
+        params->maps.push_front(ConcurrentHashMap::count_words(params->archs[cur]));
     }
+    pthread_exit(NULL);
 }
 
-void merge_maps(const Lista<ConcurrentHashMap>& maps,
-                ConcurrentHashMap& unifiedMap,
-                std::atomic_uint& next,
-                size_t size) {
+struct merge_maps_s {
+    const Lista<ConcurrentHashMap>& maps;
+    ConcurrentHashMap& unifiedMap;
+    std::atomic_uint& next;
+    size_t size;
+};
+
+void* merge_maps(void* arg) {
+    merge_maps_s* params = (merge_maps_s*)arg;
     uint cur;
-    while((cur = next++) < size) {
-        const ConcurrentHashMap& map = maps.iesimo(cur);
+    while((cur = params->next++) < params->size) {
+        const ConcurrentHashMap& map = params->maps.iesimo(cur);
         for (int i = 0; i < 26; ++i) {
             for (auto lista = map.tabla[i]->CrearIt(); lista.HaySiguiente(); lista.Avanzar()) {
                 for (uint j = 0; j < lista.Siguiente().second; ++j) {
-                    unifiedMap.addAndInc(lista.Siguiente().first);
+                    params->unifiedMap.addAndInc(lista.Siguiente().first);
                 }
             }
         }
     }
+    pthread_exit(NULL);
 }
 
 // ugly not-so-concurrent version
@@ -221,27 +269,32 @@ entrada ConcurrentHashMap::maximum(unsigned int p_archivos,
     std::vector<std::string> files(archs.begin(), archs.end());
     std::atomic_uint next(0);
     // start exactly n threads
-    std::list< std::thread > ts;
+    std::list< pthread_t > ts;
+
+    count_words_s cw_params = {maps, files, next};
     for (uint i = 0; i < p_archivos; ++i) {
-        ts.push_back(std::thread(count_words_single, std::ref(maps),
-                                 std::cref(files), std::ref(next)));
+        pthread_t t;
+        pthread_create(&t, NULL, count_words_single, &cw_params);
+        ts.push_back(t);
     }
     // sync with all threads
     for (auto it = ts.begin(); it != ts.end(); ++it) {
-        it->join();
+        pthread_join(*it, NULL);
     }
 
     ts.clear();
     ConcurrentHashMap unifiedMap;
     next.store(0);
+    merge_maps_s mm_params = {maps, unifiedMap, next, archs.size()};
     // start exactly n threads
     for (uint i = 0; i < p_maximos; ++i) {
-        ts.push_back(std::thread(merge_maps, std::cref(maps),
-                                 std::ref(unifiedMap), std::ref(next), archs.size()));
+        pthread_t t;
+        pthread_create(&t, NULL, merge_maps, &mm_params);
+        ts.push_back(t);
     }
     // sync with all threads
     for (auto it = ts.begin(); it != ts.end(); ++it) {
-        it->join();
+        pthread_join(*it, NULL);
     }
 
     return unifiedMap.maximum(p_maximos);
