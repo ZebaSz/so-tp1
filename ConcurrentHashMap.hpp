@@ -1,6 +1,7 @@
 #ifndef SO_TP1_CONCURRENTHASHMAP_H
 #define SO_TP1_CONCURRENTHASHMAP_H
 
+#include <memory>
 #include <list>
 #include <string>
 #include <vector>
