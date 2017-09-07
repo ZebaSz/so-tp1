@@ -66,6 +66,18 @@ test-time-run: test-time
 	done; done
 	rm -f corpus-[0-4]
 
+test-time-2: $(OBJ) test-time-2.cpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test-time-2.cpp $(OBJ) $(LDLIBS)
+	
+test-time-2-run: test-time-2
+	rm -f time-2-data.csv
+	echo "tmax,Tiempo en nanosegundos" > time-2-data.csv
+	for i in 0 1 2 3 4; do sed -n "$$((i * 500 + 1)),$$(((i + 1) * 500))p" corpus >corpus-"$$i"; done
+	for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do \
+		./test-time-2 $$((i + 1)); \
+	done
+	rm -f corpus-[0-4]
+
 clean:
 	rm -f $(BIN) $(OBJ)
 	rm -f corpus-*
