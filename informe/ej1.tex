@@ -1,12 +1,10 @@
-\section{Intro}
+\section{Introducción}
 
 El propósito de este trabajo práctico es experimentar con \texttt{pthreads}, tanto por los beneficios que trae (en particular en terminos en de performance) y los desafíos que presenta (al sincronizar los varios hilos de ejecución y mantener consistencia). En este TP se implementa un ConcurrentHashMap simplificado que alberga strings y contadores de las mismas.
 
-\section{Ejercicio 1}
+Para completar el trabajo práctico debimos completar una Lista Atómica provista por la cátedra, y así como implementar desde cero el ConcurrentHashMap, utilizando la Lista previamente mencionada.
 
-Este ejercicio consistía en la implementación de las estructuras de datos del trabajo práctico. Por un lado, había que completar la Lista Atómica provista por la cátedra, y por el otro había que implementar desde cero un ConcurrentHashMap, utilizando la Lista previamente mencionada.
-
-\subsection{Lista Atómica}
+\section{Lista Atómica}
 
 La lista se encontraba mayormente implementada, salvo por una operación: \texttt{push\_front}. Esta operación es la única que modifica la lista en sí (si ignoramos la modificación de sus elementos), por lo que esta operación es la que hace a la lista ''atómica``.
 
@@ -16,7 +14,7 @@ La operación que utilizamos en la versión final es un \texttt{atomic\_compare\
 
 Esto significa que la inserción no necesariamente coincide con el orden en que fueron llamadas, sino que depende de los cambios de contexto/thread.
 
-\subsection{ConcurrentHashMap}
+\section{ConcurrentHashMap}
 
 El ConcurrentHashMap implementado toma ciertas medidas para permitir que ciertas operaciones (pero no todas) puedan ser ejecutadas en paralelo:
 
