@@ -9,3 +9,6 @@ Como puede observarse, el tiempo de procesamiento se reduce drásticamente hasta
 La diferencia de tiempo entre estos dos casos puede ser explicada por la ejecución de otros procesos ajenos al experimento (pertenecientes al sistema operativo), los cuales pueden hacer variar las mediciones.
 
 También puede apreciarse que luego de llegar a este mínimo, el tiempo de ejecución aumenta lentamente a medida que se utilizan más threads.
+Esto se puede ser causado por múltiples motivos:
+Hay un overhead causado por switchear entre threads, al aumentar su número habrá más cambios, lo que puede reducir la eficiencia del proceso.
+A medida que aumentan los threads, aumentan las llamadas al sistema (syscalls) para su sincronización (mutexes), estas son operaciones costosas, por lo que muchas llamadas pueden enlentecer el proceso.
